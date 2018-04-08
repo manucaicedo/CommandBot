@@ -30,6 +30,16 @@ public class BotConfig {
 
     private String proxyPassword;
 
+    private String mongoURL;
+
+    public String getMongoURL() {
+        return mongoURL;
+    }
+
+    public void setMongoURL(String mongoURL) {
+        this.mongoURL = mongoURL;
+    }
+
     public String getProxyURL() {
         return proxyURL;
     }

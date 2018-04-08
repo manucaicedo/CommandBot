@@ -1,10 +1,12 @@
 import bot.ChatBot;
+import bot.ConnectionsListenerImpl;
 import bot.RoomChatBot;
 import config.BotConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.symphonyoss.client.SymphonyClient;
 import org.symphonyoss.client.model.Room;
+import org.symphonyoss.client.services.ConnectionsService;
 import org.yaml.snakeyaml.Yaml;
 import utils.SymphonyAuth;
 
@@ -26,7 +28,7 @@ public class BotMainApp {
     public BotMainApp() {
         Yaml yaml = new Yaml();
         try (InputStream in = BotConfig.class
-                .getResourceAsStream("/sample-config.yml")) {
+                .getResourceAsStream("/config-sup.yml")) {
             config = yaml.loadAs(in, BotConfig.class);
         } catch (IOException e) {
             e.printStackTrace();
@@ -35,6 +37,9 @@ public class BotMainApp {
             symClient = new SymphonyAuth().init(config);
             chatBot = ChatBot.getInstance(symClient, config);
             roomChatBot = RoomChatBot.getInstance(symClient,config);
+            ConnectionsService connectionsService = new ConnectionsService(symClient);
+            ConnectionsListenerImpl connectionsListener = new ConnectionsListenerImpl(symClient);
+            connectionsService.addListener(connectionsListener);
         } catch (Exception e) {
             LOG.error("error", e);
         }

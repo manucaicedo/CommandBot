@@ -1,6 +1,9 @@
 package bot;
 
+import commands.*;
 import config.BotConfig;
+import model.MessageEntities;
+import mongo.MongoDBClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.symphonyoss.client.SymphonyClient;
@@ -10,8 +13,12 @@ import org.symphonyoss.client.model.Chat;
 import org.symphonyoss.client.services.*;
 import org.symphonyoss.symphony.clients.model.SymMessage;
 import org.symphonyoss.symphony.clients.model.SymUser;
+import utils.ContentConstants;
+import utils.MessageParser;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Set;
 
 public class ChatBot implements ChatListener, ChatServiceListener {
@@ -20,6 +27,10 @@ public class ChatBot implements ChatListener, ChatServiceListener {
     private final Logger logger = LoggerFactory.getLogger(ChatBot.class);
     private SymphonyClient symClient;
     private BotConfig config;
+    private Map<String, Command> commandMap;
+    private Command checkInCommand;
+    private MessageParser messageParser;
+    private MongoDBClient mongoDBClient;
 
 
     protected ChatBot(SymphonyClient symClient, BotConfig config) {
@@ -41,23 +52,23 @@ public class ChatBot implements ChatListener, ChatServiceListener {
 
 
         symClient.getChatService().addListener(this);
-
-        Chat chat = new Chat();
-        chat.setLocalUser(symClient.getLocalUser());
-        Set<SymUser> recipients = new HashSet<>();
-        try {
-            SymUser recipient = symClient.getUsersClient().getUserFromEmail(config.getUserEmailAddress());
-            recipients.add(recipient);
-            chat.setRemoteUsers(recipients);
-            symClient.getChatService().addChat(chat);
-            SymMessage reporterMessage = new SymMessage();
-            reporterMessage.setMessageText("Test message");
-            symClient.getMessagesClient().sendMessage(chat.getStream(), reporterMessage);
-        } catch (UsersClientException e) {
-            logger.error("Failed to find user", e);
-        }catch (MessagesException e) {
-            logger.error("Failed to send message", e);
-        }
+        commandMap = new HashMap<>();
+        Command helpCommand = new HelpCommand("help", "Get all commands this bot accepts",symClient);
+        Command agendaCommand = new AgendaCommand("agenda", "See today's agenda", symClient);
+        Command nowCommand = new NowCommand("now", "See what is going on right now",symClient, config.getMongoURL());
+        Command upNextCommand = new UpNextCommand("upnext", "See which event is happening next.", symClient, config.getMongoURL());
+        Command mapCommand = new MapCommand("map", "Get map of event", symClient, config.getMongoURL());
+        Command bioCommand = new BioCommand("bio", "Get bio of speakers", symClient, config.getMongoURL());
+        checkInCommand = new CheckInCommand("checkin", "Check-in to sponsor booths by sending the hashtag on their table",config.getMongoURL(),symClient);
+        commandMap.put("agenda", agendaCommand);
+        commandMap.put("help", helpCommand);
+        commandMap.put("now", nowCommand);
+        commandMap.put("next", upNextCommand);
+        commandMap.put("upnext", upNextCommand);
+        commandMap.put("map", mapCommand);
+        commandMap.put("bio", bioCommand);
+        messageParser = new MessageParser();
+        mongoDBClient = MongoDBClient.getInstance(config.getMongoURL());
 
     }
 
@@ -70,24 +81,34 @@ public class ChatBot implements ChatListener, ChatServiceListener {
                 message.getFromUserId(),
                 message.getMessage(),
                 message.getMessageType());
-        SymMessage message2;
 
-        if (message.getMessageText().toLowerCase().contains("test")) {
-
-
-            message2 = new SymMessage();
-
-            message2.setMessage("<messageML><div><b><i>Message Received.</i></b></div></messageML>");
-            try {
-                symClient.getMessagesClient().sendMessage(message.getStream(), message2);
-            } catch (MessagesException e) {
-                logger.error("Failed to send message", e);
+        MessageEntities messageEntities = messageParser.getMessageEntities(message.getEntityData());
+        boolean done = false;
+        for (String hashtag: messageEntities.getHashtags()) {
+            if(commandMap.containsKey(hashtag)){
+                Command command = commandMap.get(hashtag);
+                command.execute(message);
+                done = true;
             }
-
         }
-
-
-
+        if (!done){
+            for (String hashtag: messageEntities.getHashtags()) {
+                if (mongoDBClient.getBoothRoom(hashtag)!=null){
+                    checkInCommand.execute(message);
+                    done=true;
+                }
+            }
+        }
+        if(!done){
+            SymMessage errorMsg = new SymMessage();
+            errorMsg.setMessage(ContentConstants.ERROR_MESSAGE);
+            try {
+                symClient.getMessagesClient().sendMessage(message.getStream(),errorMsg);
+                done=true;
+            } catch (MessagesException e) {
+                e.printStackTrace();
+            }
+        }
     }
 
 

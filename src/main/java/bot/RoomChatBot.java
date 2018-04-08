@@ -1,6 +1,11 @@
 package bot;
 
+import commands.BlastCommand;
+import commands.CheckInCommand;
+import commands.HelpCommand;
+import commands.ReturnInfoCommand;
 import config.BotConfig;
+import model.MessageEntities;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.symphonyoss.client.SymphonyClient;
@@ -11,6 +16,12 @@ import org.symphonyoss.client.services.RoomEventListener;
 import org.symphonyoss.client.services.RoomService;
 import org.symphonyoss.client.services.RoomServiceEventListener;
 import org.symphonyoss.symphony.clients.model.SymMessage;
+import org.symphonyoss.symphony.clients.model.SymStreamTypes;
+import utils.MessageParser;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 public class RoomChatBot implements RoomServiceEventListener, RoomEventListener {
 
@@ -19,7 +30,9 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
     private SymphonyClient symClient;
     private RoomService roomService;
     private BotConfig config;
-
+    private Map<String, Command> commandMap;
+    private Command defaultCommand;
+    private MessageParser messageParser;
 
     protected RoomChatBot(SymphonyClient symClient, BotConfig config) {
         this.symClient=symClient;
@@ -40,8 +53,15 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
 
         roomService = symClient.getRoomService();
         roomService.addRoomServiceEventListener(this);
-
-
+        commandMap = new HashMap<>();
+        Command helpCommand = new HelpCommand("help", "Get all commands this bot accepts",symClient);
+        Command blastCommand = new BlastCommand("blast","Blast all users connected to the bot.",symClient,config.getMongoURL());
+        Command checkInCommand = new CheckInCommand("checkin", "Check-in user to this room's booth. by sending <hash tag=\"checkin\"/> [@mention (preferred) or email address]",config.getMongoURL(),symClient);
+        Command defaultCommand = new ReturnInfoCommand();
+        commandMap.put("help", helpCommand);
+        commandMap.put("blast",blastCommand);
+        commandMap.put("checkin", checkInCommand);
+        messageParser = new MessageParser();
     }
 
     @Override
@@ -54,20 +74,14 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
                 message.getFromUserId(),
                 message.getMessage(),
                 message.getMessageType());
-        SymMessage message2;
 
-        if (message.getMessageText().toLowerCase().contains("test")) {
+        MessageEntities messageEntities = messageParser.getMessageEntities(message.getEntityData());
 
-
-            message2 = new SymMessage();
-
-            message2.setMessage("<messageML><div><b><i>Message Received.</i></b></div></messageML>");
-            try {
-                symClient.getMessagesClient().sendMessage(message.getStream(), message2);
-            } catch (MessagesException e) {
-                logger.error("Failed to send message", e);
+        for (String hashtag: messageEntities.getHashtags()) {
+            if(commandMap.containsKey(hashtag)){
+                Command command = commandMap.get(hashtag);
+                command.execute(message);
             }
-
         }
     }
 
