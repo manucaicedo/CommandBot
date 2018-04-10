@@ -8,4 +8,3 @@ botEmailAddress: bot.user43@example.com
 agentAPIEndpoint: https://sup-agent.symphony.com/agent
 podAPIEndpoint: https://sup.symphony.com/pod
 userEmailAddress: manuela.caicedo@symphony.com
-mongoURL: mongodb://innovate:Symphony!123@innovatebot-shard-00-00-7x2br.mongodb.net:27017,innovatebot-shard-00-01-7x2br.mongodb.net:27017,innovatebot-shard-00-02-7x2br.mongodb.net:27017/InnovateBot?ssl=true&replicaSet=InnovateBot-shard-0&authSource=admin

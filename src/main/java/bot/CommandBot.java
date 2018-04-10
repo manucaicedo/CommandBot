@@ -1,40 +1,37 @@
 package bot;
 
-import commands.BlastCommand;
-import commands.CheckInCommand;
+import commands.DefaultCommand;
 import commands.HelpCommand;
-import commands.ReturnInfoCommand;
+import commands.TargetStringCommand;
 import config.BotConfig;
 import model.MessageEntities;
+import mongo.MongoDBClient;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.symphonyoss.client.SymphonyClient;
 import org.symphonyoss.client.events.*;
-import org.symphonyoss.client.exceptions.MessagesException;
+import org.symphonyoss.client.model.Chat;
 import org.symphonyoss.client.model.Room;
-import org.symphonyoss.client.services.RoomEventListener;
-import org.symphonyoss.client.services.RoomService;
-import org.symphonyoss.client.services.RoomServiceEventListener;
+import org.symphonyoss.client.services.*;
 import org.symphonyoss.symphony.clients.model.SymMessage;
-import org.symphonyoss.symphony.clients.model.SymStreamTypes;
 import utils.MessageParser;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-public class RoomChatBot implements RoomServiceEventListener, RoomEventListener {
+public class CommandBot implements ChatListener, ChatServiceListener, RoomServiceEventListener, RoomEventListener {
 
-    private static RoomChatBot instance;
-    private final Logger logger = LoggerFactory.getLogger(RoomChatBot.class);
+    private static CommandBot instance;
+    private final Logger logger = LoggerFactory.getLogger(CommandBot.class);
     private SymphonyClient symClient;
-    private RoomService roomService;
     private BotConfig config;
     private Map<String, Command> commandMap;
     private Command defaultCommand;
     private MessageParser messageParser;
+    private MongoDBClient mongoDBClient;
+    private RoomService roomService;
 
-    protected RoomChatBot(SymphonyClient symClient, BotConfig config) {
+    protected CommandBot(SymphonyClient symClient, BotConfig config) {
         this.symClient=symClient;
         this.config = config;
         init();
@@ -42,31 +39,32 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
 
     }
 
-    public static RoomChatBot getInstance(SymphonyClient symClient, BotConfig config){
+    public static CommandBot getInstance(SymphonyClient symClient, BotConfig config){
         if(instance==null){
-            instance = new RoomChatBot(symClient,config);
+            instance = new CommandBot(symClient,config);
         }
         return instance;
     }
 
     private void init() {
+        symClient.getChatService().addListener(this);
 
         roomService = symClient.getRoomService();
         roomService.addRoomServiceEventListener(this);
         commandMap = new HashMap<>();
         Command helpCommand = new HelpCommand("help", "Get all commands this bot accepts",symClient);
-        Command blastCommand = new BlastCommand("blast","Blast all users connected to the bot.",symClient,config.getMongoURL());
-        Command checkInCommand = new CheckInCommand("checkin", "Check-in user to this room's booth. by sending <hash tag=\"checkin\"/> [@mention (preferred) or email address]",config.getMongoURL(),symClient);
-        Command defaultCommand = new ReturnInfoCommand();
+        Command targetStringCommand = new TargetStringCommand("search", "Search across all accounts", symClient);
+        defaultCommand = new DefaultCommand("error", "Could not understand command", symClient);
         commandMap.put("help", helpCommand);
-        commandMap.put("blast",blastCommand);
-        commandMap.put("checkin", checkInCommand);
+        commandMap.put("search", targetStringCommand);
         messageParser = new MessageParser();
+        mongoDBClient = MongoDBClient.getInstance(config.getMongoURL());
+
     }
 
-    @Override
-    public void onRoomMessage(SymMessage message) {
 
+    @Override
+    public void onChatMessage(SymMessage message) {
         if (message == null)
             return;
         logger.debug("TS: {}\nFrom ID: {}\nSymMessage: {}\nSymMessage Type: {}",
@@ -74,15 +72,24 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
                 message.getFromUserId(),
                 message.getMessage(),
                 message.getMessageType());
+        processMessage(message);
+    }
 
-        MessageEntities messageEntities = messageParser.getMessageEntities(message.getEntityData());
+    @Override
+    public void onNewChat(Chat chat) {
+        chat.addListener(this);
 
-        for (String hashtag: messageEntities.getHashtags()) {
-            if(commandMap.containsKey(hashtag)){
-                Command command = commandMap.get(hashtag);
-                command.execute(message);
-            }
-        }
+        logger.debug("New chat session detected on stream {} with {}", chat.getStream().getStreamId(), chat.getRemoteUsers());
+    }
+
+    @Override
+    public void onRemovedChat(Chat chat) {
+
+    }
+
+    @Override
+    public void onRoomMessage(SymMessage symMessage) {
+        processMessage(symMessage);
     }
 
     @Override
@@ -135,4 +142,26 @@ public class RoomChatBot implements RoomServiceEventListener, RoomEventListener 
 
     }
 
+    public void processMessage(SymMessage message){
+        if (message == null)
+            return;
+        logger.debug("TS: {}\nFrom ID: {}\nSymMessage: {}\nSymMessage Type: {}",
+                message.getTimestamp(),
+                message.getFromUserId(),
+                message.getMessage(),
+                message.getMessageType());
+
+        MessageEntities messageEntities = messageParser.getMessageEntities(message.getEntityData());
+        boolean done = false;
+        for (String hashtag: messageEntities.getHashtags()) {
+            if(commandMap.containsKey(hashtag)){
+                Command command = commandMap.get(hashtag);
+                command.execute(message);
+                done = true;
+            }
+        }
+        if (!done){
+            defaultCommand.execute(message);
+        }
+    }
 }

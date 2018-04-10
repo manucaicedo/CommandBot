@@ -62,3 +62,4 @@ logs
 testbot.yml
 config.yml
 prod-config.yml
+config-sup.yml
